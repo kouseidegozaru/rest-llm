@@ -1,0 +1,67 @@
+services:
+
+  # ── Django REST API ────────────────────────────────────────────────
+  api:
+    build: .
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      # OllamaはDockerネットワーク内でサービス名で参照
+      OLLAMA_BASE_URL: http://ollama:11434
+    depends_on:
+      ollama:
+        condition: service_healthy
+    networks:
+      - llm_net
+
+  # ── Ollama LLMサーバー ─────────────────────────────────────────────
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    ports:
+      - "11434:11434"          # ホストからも直接アクセスしたい場合
+    volumes:
+      - ollama_data:/root/.ollama   # モデルデータを永続化
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - llm_net
+
+    # GPU を使用する場合は以下のコメントを外す
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: all
+    #           capabilities: [gpu]
+
+  # ── モデル自動ダウンロード (初回のみ) ─────────────────────────────
+  model-puller:
+    image: ollama/ollama:latest
+    depends_on:
+      ollama:
+        condition: service_healthy
+    volumes:
+      - ollama_data:/root/.ollama
+    entrypoint: >
+      sh -c "ollama pull ${OLLAMA_DEFAULT_MODEL:-gemma3:4b} && echo 'Model ready.'"
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    networks:
+      - llm_net
+    restart: "no"   # 一度だけ実行
+
+volumes:
+  ollama_data:
+
+networks:
+  llm_net:
+    driver: bridge
